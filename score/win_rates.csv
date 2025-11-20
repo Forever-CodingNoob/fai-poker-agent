@@ -1,0 +1,10 @@
+agent \ baseline,baseline0,baseline1,baseline2,baseline3,baseline4,baseline5,baseline6,baseline7
+basic,0.54,0.7,0.76,0.82,0.38,0.25,0.27,0.32
+dynC,0.57,0.52,0.84,0.83,0.44,0.4,0.47,0.4
+smoothUCT,0.52,0.53,0.68,0.8,0.36,0.25,0.35,0.3
+dynC+smoothUCT,0.47,0.58,0.82,0.9,0.42,0.4,0.31,0.38
+PBagent,0.59,0.68,0.71,0.78,0.37,0.18,0.2,0.22
+dynC+PBagent,0.54,0.5,0.81,0.86,0.33,0.33,0.36,0.37
+smoothUCT+PBagent,0.54,0.55,0.67,0.59,0.36,0.17,0.22,0.26
+dynC+smoothUCT+PBagent,0.42,0.57,0.67,0.69,0.45,0.3,0.49,0.43
+PBagent w/o MCTS,0.29,0.35,0.47,0.63,0.13,0.17,0.12,0.29

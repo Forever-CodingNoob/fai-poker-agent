@@ -5,54 +5,82 @@ from game.engine.card import Card
 from game.engine.table import Table
 from game.engine.pay_info import PayInfo
 from game.engine.player import Player
+from game.engine.poker_constants import PokerConstants as Const
 
-from typing import Optional, Any, List, Dict, Tuple
+from agents.config import Tunables
 
-MU_ROUND   = 4.5
-SIGMA_ROUND = 20.0
+from typing import Optional, Any, List, Dict, Tuple, Set
+
+#MU_ROUND   = 4.5
+#SIGMA_ROUND = 20.0
+
+
+
+def smart_raise_sizes(min_r: int, max_r: int, pot: int, bb: int, street: Const.Street, stack: int) -> Set[int]:
+    sizes: Set[int] = {min_r, max_r} # include max value ?????
+
+    if street == Const.Street.PREFLOP:
+        sizes |= {round(2.5*bb), round(3*bb)}
+    else:
+        sizes |= {round(pot/3), round(2*pot/3), pot}
+        if stack / pot > 1.5:
+            sizes.add(round(1.5*pot))
+    return {size for size in sizes if min_r <= size <= max_r}
+
+def log_raise_sizes(min_r: int, max_r: int, count: int = 3) -> Set[int]:
+    if count < 1:
+        return set()
+    gap: float = (math.log(max_r) - math.log(min_r)) / (count + 1)
+    return {round(math.exp(math.log(min_r) + gap * i)) for i in range(1, count + 1)}
+
+def linear_raise_sizes(min_r: int, max_r: int, count: int = 3) -> Set[int]:
+    if count < 1:
+        return set()
+    gap: float = (max_r - min_r) / (count + 1)
+    return {round(min_r + gap * i) for i in range(1, count + 1)}
+
 
 # ref: https://www.csie.ntu.edu.tw/~b09902097/HoldemAgent.pdf
-
-def game_rate(t_chip, remain_round) -> float:
-    if remain_round == 0:
-        return 1.0 if t_chip > 0 else 0.0
-    mu = remain_round * MU_ROUND
-    sigma = math.sqrt(remain_round) * SIGMA_ROUND
-    return 1.0 - NormalDist(mu, sigma).cdf(-t_chip)
-
-def round_rate(my_uuid: str, table: Table) -> float:
-    community: list[Card] = table.get_community_card()
-    deck_list: list[Card] = table.deck.deck[:]
-    random.shuffle(deck_list)
-
-    remaining_players: List[Player] = [p for p in table.seats.players if p.pay_info.status != PayInfo.FOLDED]
-
-    # deal unknown hole cards
-    for player in remaining_players:
-        if len(player.hole_card)==0:
-            player.hole_card = [deck_list.pop(), deck_list.pop()]
-
-    # finish board to 5 cards
-    board: list[Card] = community[:] # copy list
-    while len(board) < 5:
-        board.append(deck_list.pop())
-
-    scores = {p.uuid:HandEvaluator.eval_hand(p.hole_card, board) for p in remaining_players}
-    my_score = scores[my_uuid]
-    scores_list = list(scores.values())
-    best = max(scores_list)
-    n_best = scores_list.count(best)
-    if my_score == best:
-        win_share = 1.0 / n_best
-    else:
-        win_share = 0.0
-    return win_share
-
-
-
 class ProbAgent:
     @staticmethod
-    def act(sim_state: Dict[str, Any], player_index: int, actions: List[Dict[str, Any]], round_start_stacks: Dict[str, int]) -> Tuple[str, int]:
+    def game_rate(t_chip, remain_round) -> float:
+        if remain_round <= 0:
+            return 1.0 if t_chip > 0 else 0.0
+        mu = remain_round * Tunables.MU_ROUND
+        sigma = math.sqrt(remain_round) * Tunables.SIGMA_ROUND
+        return 1.0 - NormalDist(mu, sigma).cdf(-t_chip)
+
+    @staticmethod
+    def round_rate(my_uuid: str, table: Table) -> float:
+        community: list[Card] = table.get_community_card()
+        deck_list: list[Card] = table.deck.deck[:]
+        random.shuffle(deck_list)
+
+        remaining_players: List[Player] = [p for p in table.seats.players if p.pay_info.status != PayInfo.FOLDED]
+
+        # deal unknown hole cards
+        for player in remaining_players:
+            if len(player.hole_card)==0:
+                player.hole_card = [deck_list.pop(), deck_list.pop()]
+
+        # finish board to 5 cards
+        board: list[Card] = community[:] # copy list
+        while len(board) < 5:
+            board.append(deck_list.pop())
+
+        scores = {p.uuid:HandEvaluator.eval_hand(p.hole_card, board) for p in remaining_players}
+        my_score = scores[my_uuid]
+        scores_list = list(scores.values())
+        best = max(scores_list)
+        n_best = scores_list.count(best)
+        if my_score == best:
+            win_share = 1.0 / n_best
+        else:
+            win_share = 0.0
+        return win_share
+
+    @classmethod
+    def act(cls, sim_state: Dict[str, Any], player_index: int, actions: List[Dict[str, Any]], round_start_stacks: List[int], try_all_raise_values: bool=False) -> Tuple[str, int]:
         call_amt = actions[1]["amount"]
         raise_rng = actions[2]["amount"]
         min_r, max_r = raise_rng["min"], raise_rng["max"]
@@ -60,12 +88,12 @@ class ProbAgent:
         player: Player = sim_state["table"].seats.players[player_index]
 
         initial_stack  = 1000
-        round_start_stack = round_start_stacks[player.uuid]
+        round_start_stack = round_start_stacks[player_index]
         t_base = round_start_stack - initial_stack # money earned at the start of the round
         bet = player.pay_info.amount # money the player has bet in the current round
 
         # round-rate p
-        p = round_rate(player.uuid, sim_state["table"])
+        p = cls.round_rate(player.uuid, sim_state["table"])
         # rounds left
         C_left = 20 - sim_state["round_count"]   # max_round=20
 
@@ -75,13 +103,13 @@ class ProbAgent:
 
         # fold
         t_fold = t_base - bet
-        ev_fold: float = game_rate(t_fold, C_left - 1)
+        ev_fold: float = cls.game_rate(t_fold, C_left - 1)
 
         # call
         add_amount = call_amt - player.paid_sum() # amount of chips to pay if called
         t_plus  = t_base - bet + pot
         t_minus = t_base - bet - add_amount
-        ev_call: float = p * game_rate(t_plus, C_left - 1) + (1-p) * game_rate(t_minus, C_left - 1)
+        ev_call: float = p * cls.game_rate(t_plus, C_left - 1) + (1-p) * cls.game_rate(t_minus, C_left - 1)
 
         # raise
         remaining_players_except_me = [(p, p.paid_sum()) for i,p in enumerate(sim_state["table"].seats.players) if i!=player_index and p.pay_info.status != PayInfo.FOLDED]
@@ -90,17 +118,25 @@ class ProbAgent:
             opponent_add_amount = sum(raise_amount - paid_sum for pl,paid_sum in remaining_players_except_me if pl.stack >= raise_amount-paid_sum) # assuming all successors call
             t_plus  = t_base - bet + pot + opponent_add_amount # this should be our opponent's add amount
             t_minus = t_base - bet - add_amount
-            return p * game_rate(t_plus, C_left - 1) + (1-p) * game_rate(t_minus, C_left - 1)
+            return p * cls.game_rate(t_plus, C_left - 1) + (1-p) * cls.game_rate(t_minus, C_left - 1)
 
         # pick best EV
         best_ev, best_action, best_amt = ev_fold, "fold", 0
         if ev_call > best_ev:
             best_ev, best_action, best_amt = ev_call, "call", call_amt
         if min_r != -1:
-            raise_candidates = [min_r, int(pot/2), pot, max_r]
-            for x in raise_candidates:
-                if not (min_r <= x <= max_r):
-                    continue
+            if try_all_raise_values:
+                raise_values: Any = range(min_r, max_r+1, 1)
+            else:
+                raise_values: Any = smart_raise_sizes(
+                    min_r=min_r,
+                    max_r=max_r,
+                    pot=pot,
+                    bb=10, # hardcoded bb
+                    street=sim_state["street"],
+                    stack=player.stack
+                )
+            for x in raise_values:
                 ev_r = ev_raise(x)
                 if ev_r > best_ev:
                     best_ev, best_action, best_amt = ev_r, "raise", x

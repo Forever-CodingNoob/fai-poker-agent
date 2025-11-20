@@ -61,7 +61,7 @@ class BasePokerPlayer(object):
             with timeout(10):
                 action, amount = self.declare_action(valid_actions, hole_card, round_state)
         except Exception as e:
-            raise e
+            #raise e
             action, amount = valid_actions[0]["action"], valid_actions[0]["amount"]
         return action, amount
 

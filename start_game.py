@@ -4,14 +4,14 @@ from agents.my_player import setup_ai as my_ai
 from agents.call_player import setup_ai as call_ai
 from agents.random_player import setup_ai as random_ai
 from agents.console_player import setup_ai as console_ai
-from baseline0 import setup_ai as baseline0_ai
+from baseline7 import setup_ai as baseline7_ai
 
 config = setup_config(max_round=20, initial_stack=1000, small_blind_amount=5)
-config.register_player(name="p1", algorithm=baseline0_ai())
-config.register_player(name="p2", algorithm=random_ai())
+config.register_player(name="baseline_ai", algorithm=baseline7_ai())
+#config.register_player(name="p2", algorithm=random_ai())
 
 ## Play in interactive mode if uncomment
-config.register_player(name="callPlayer", algorithm=call_ai())
+#config.register_player(name="callPlayer", algorithm=call_ai())
 #config.register_player(name="me", algorithm=console_ai())
 config.register_player(name="my_ai", algorithm=my_ai())
 

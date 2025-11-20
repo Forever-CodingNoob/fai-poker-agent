@@ -10,6 +10,8 @@ from game.engine.deck import Deck
 from game.engine.poker_constants import PokerConstants as Const
 
 from agents.uct import UCTState, UCT
+from agents.prob import ProbAgent
+from agents.config import Tunables
 
 from typing import Optional, Any, List, Dict, Set, Tuple
 import json
@@ -69,7 +71,7 @@ def decode_round_state(encoded_round_state: dict, my_uuid: str, my_hole_card: Li
             elif player_hist['action'] in (Player.ACTION_BIG_BLIND, Player.ACTION_SMALL_BLIND):
                 paid = player_hist['amount']
             else:
-                assert player_hist['action'] == Player.ACTION_FOLD_STR
+                #assert player_hist['action'] == Player.ACTION_FOLD_STR
                 pass
             player.pay_info.update_by_pay(paid)
             if street_name == enc["street"]:
@@ -97,34 +99,47 @@ def decode_round_state(encoded_round_state: dict, my_uuid: str, my_hole_card: Li
 
 
 
-class MyAIPlayer(BasePokerPlayer):
+class UCTPlayer(BasePokerPlayer):
     def __init__(self):
         super().__init__()
         self.my_index: Optional[int] = None
-        self.round_start_stacks: Optional[dict[str, int]] = None
+        self.round_start_stacks: Optional[List[int]] = None
 
     def declare_action(self, valid_actions, hole_card, round_state) -> Tuple[str, int]:
         # valid_actions format => [fold_action_info, call_action_info, raise_action_info]
         #print(valid_actions)
         decoded_round_state: Dict[str, Any] = decode_round_state(round_state, self.uuid, hole_card)
-        #print(decoded_round_state)
-        #print(decoded_round_state['table'].serialize())
-        action, amount = UCT.search(
-            root_state=decoded_round_state,
-            my_index=self.my_index,
-            round_start_stacks=self.round_start_stacks,
-            time_limit=9.8,
-            verbose=False
-        )
 
-        assert (
-            (action == valid_actions[0]['action'] and amount == valid_actions[0]['amount'])
-            or (action == valid_actions[1]['action'] and amount == valid_actions[1]['amount'])
-            or (action == valid_actions[2]['action'] and valid_actions[2]['amount']['min'] <= amount <= valid_actions[2]['amount']['max'])
-        ), f"action: {action}, amount: {amount}, valid_actions: {valid_actions}"
+        if Tunables.MONTE_CARLO:
+            action, amount = UCT.search(
+                root_state=decoded_round_state,
+                my_index=self.my_index,
+                round_start_stacks=self.round_start_stacks,
+                time_limit=9.5,
+            )
+        elif Tunables.USE_PROB_AGENT:
+            action, amount = ProbAgent.act(
+                sim_state=decoded_round_state,
+                player_index=self.my_index,
+                actions=valid_actions,
+                round_start_stacks=self.round_start_stacks,
+                try_all_raise_values=True
+            )
+        else:
+            # always allin
+            if valid_actions[2]['amount']['max'] != -1:
+                action, amount = 'raise', valid_actions[2]['amount']['max']
+            else:
+                action, amount = 'call', valid_actions[1]['amount']
 
-        #assert action!='fold'
-        print(f"===== ACTION is **{action} {amount}** !!!!! =======================")
+
+
+        #assert (
+        #    (action == valid_actions[0]['action'] and amount == valid_actions[0]['amount'])
+        #    or (action == valid_actions[1]['action'] and amount == valid_actions[1]['amount'])
+        #    or (action == valid_actions[2]['action'] and valid_actions[2]['amount']['min'] <= amount <= valid_actions[2]['amount']['max'])
+        #), f"action: {action}, amount: {amount}, valid_actions: {valid_actions}"
+
         return action, amount  # action returned here is sent to the poker engine
 
     def receive_game_start_message(self, game_info):
@@ -132,7 +147,7 @@ class MyAIPlayer(BasePokerPlayer):
 
     def receive_round_start_message(self, round_count, hole_card, seats):
         self.my_index = next(i for i,seat in enumerate(seats) if seat["uuid"] == self.uuid)
-        self.round_start_stacks = {s["uuid"]: s["stack"] for s in seats}
+        self.round_start_stacks = [s["stack"] for s in seats]
 
     def receive_street_start_message(self, street, round_state):
         pass
@@ -146,4 +161,4 @@ class MyAIPlayer(BasePokerPlayer):
 
 
 def setup_ai():
-    return MyAIPlayer()
+    return UCTPlayer()
